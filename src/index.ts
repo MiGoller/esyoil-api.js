@@ -6,14 +6,25 @@
  * Copyright (c) 2021 MiGoller
  */
 
+//  Third party libraries
 import axios, { AxiosRequestConfig, AxiosResponse } from "axios";
+
+//  esyoil type definitions
+import * as esyoil_types from "./esyoil_types";
 
 //  Globally defined endpoints
 const ENDPOINT = {
     USER: {
-        "LOGIN": "https://api.esyoil.com/v1/auth/login"
+        "LOGIN": "https://api.esyoil.com/v1/auth/login",
+        "ME": "https://api.esyoil.com/v1/auth/@me",
+        "DELIVERY_ADDRESSES": "https://api.esyoil.com/v1/user/@me/delivery-addresses"
+    },
+    TANK: {
+        "CURRENT": "https://api.esyoil.com/v1/tank/get"
     }
 };
+
+const MAX_RETRIES = 5;
 
 /**
  * Helper function to generate a GUID
@@ -85,6 +96,7 @@ export class Client {
     _password: string | undefined = undefined;
     _deviceId: string | undefined = undefined;
     _auth = new Auth();
+    maxRetries: number = MAX_RETRIES;
 
     constructor(username: string, password: string, deviceId?: string) {
         if (!username) throw new Error("USERNAME must not be empty!");
@@ -124,18 +136,103 @@ export class Client {
      * @param requestConfig 
      * @returns 
      */
-    async _apiRequest(requestConfig: AxiosRequestConfig): Promise<AxiosResponse> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    async _apiRequest(requestConfig: AxiosRequestConfig): Promise<any> {
         if (!requestConfig) throw new Error("requestConfig is missing or empty!");
-        try {
-            return await axios.request(requestConfig);
+
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        } catch (error: any) {
-            if (error.response) 
-                throw new Error(`${error.response.status} - ${error.response.statusText}`);
-            else
-                throw error;
+        let data: any | undefined = undefined;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let lastError: any | undefined = undefined;
+        let retryCounter = 0;
+
+        while ((data === undefined) && (retryCounter < this.maxRetries)) {
+            //  Increase retry-counter
+            retryCounter++;
+
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            let response: any | undefined = undefined;
+
+            try {
+                //  Run the API request
+                response = await axios.request(requestConfig);
+
+                 //  Check Axios response
+                if (response === undefined) {
+                    //  Axios request failed to succeed but did not throw any error. Should never happen.
+                    throw new Error("Axios request failed to succeed but did not throw any error. Should never happen.");
+                }
+                else {
+                    // console.dir(response, {depth: null, colors: true});
+
+                    //  Check response for errors
+                    if (!response.errors) {
+                        //  Axios returned no errors in response.
+                        if (response.data) {
+                            //  Response returned data object
+        
+                            if (response.data.data) {
+                                //  Data found
+                                data = response.data.data;
+                            }
+                            else throw new Error("Returned data is empty.");
+                        }
+                        else {
+                            //  Data object missing.
+                            throw new Error("Response data object is missing.");
+                        }
+                    }
+                    else {
+                        //  There are errors.
+                        throw new Error(JSON.stringify(data.errors));
+                    }
+                }
+
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            } catch (error: any) {
+                //  Parse and forward errors
+                console.dir(error, {depth: null, colors: true});
+
+                if (error.response) {
+                    //  Axios request error
+                    lastError = `${error.response.status} - ${error.response.statusText}`;
+                }
+                else {
+                    //  Parser error
+                    lastError = error.message;
+                }
+            }
         }
+
+        if (data === undefined) {
+            if (lastError === undefined) {
+                throw new Error(`Finally failed to perform API request against ${requestConfig.url} with unknown error ...`);
+            }
+            else {
+                throw new Error(lastError);
+            }
+        }
+
+        return data;
+
+        // try {
+        //     return await axios.request(requestConfig);
+        // // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        // } catch (error: any) {
+        //     if (error.response) 
+        //         throw new Error(`${error.response.status} - ${error.response.statusText}`);
+        //     else
+        //         throw error;
+        // }
     }
+
+    /**
+     * ========================================================================
+     * ------------------------------------------------------------------------
+     *                              USER API
+     * ------------------------------------------------------------------------
+     * ========================================================================
+     */
 
     /**
      * Login to the esyoil API with the stored credentials.
@@ -202,5 +299,44 @@ export class Client {
         this._auth.reset();
 
         return true;
+    }
+
+    /**
+     * Returns information about the logged in user.
+     * @returns 
+     */
+    async getMe(): Promise<esyoil_types.Me> {
+        const response = await this._apiRequest(this._getApiRequestConfig(ENDPOINT.USER.ME));
+        return new esyoil_types.Me(response);
+    }
+
+    /**
+     * Returns all delivery addresses for the logged in user.
+     * @returns Array of delivery addresses
+     */
+    async getDeliveryAddresses(): Promise<Array<esyoil_types.DeliveryAddress>> {
+        const response = await this._apiRequest(this._getApiRequestConfig(ENDPOINT.USER.DELIVERY_ADDRESSES));
+
+        const data = new Array<esyoil_types.DeliveryAddress>();
+
+        for (let index = 0; index < response.length; index++) {
+            data.push(new esyoil_types.DeliveryAddress(response[index]));
+        }
+
+        return data;
+    }
+
+    /**
+     * ========================================================================
+     * ------------------------------------------------------------------------
+     *                              TANK API
+     * ------------------------------------------------------------------------
+     * ========================================================================
+     */
+
+    async getTank() {
+        const response = await this._apiRequest(this._getApiRequestConfig(ENDPOINT.TANK.CURRENT));
+
+        return new esyoil_types.Tank(response);
     }
 }
