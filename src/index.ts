@@ -7,7 +7,7 @@
  */
 
 //  Third party libraries
-import axios, { AxiosRequestConfig, AxiosResponse } from "axios";
+import axios, { AxiosRequestConfig, AxiosResponse, Method } from "axios";
 
 //  esyoil type definitions
 import * as esyoil_types from "./esyoil_types";
@@ -20,7 +20,10 @@ const ENDPOINT = {
         "DELIVERY_ADDRESSES": "https://api.esyoil.com/v1/user/@me/delivery-addresses"
     },
     TANK: {
-        "CURRENT": "https://api.esyoil.com/v1/tank/get"
+        "CURRENT": "https://api.esyoil.com/v1/tank/get",
+        SOUNDING: {
+            "ADD": "https://api.esyoil.com/v1/tank-sounding/add"
+        }
     }
 };
 
@@ -118,17 +121,23 @@ export class Client {
      * @param url The endpoint URL
      * @returns The request configuration
      */
-    _getApiRequestConfig(url: string): AxiosRequestConfig {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    _getApiRequestConfig(url: string, method: Method = "GET", data?: any): AxiosRequestConfig {
         if (!url) throw new Error("URL is missing or empty!");
         if (!this._auth.isLoggedIn()) throw new Error("Not logged in. Please log in first.");
 
-        return {
+        const requestConfig: AxiosRequestConfig = {
             url: url,
+            method: method,
             headers: {
                 "Authorization": `${this._auth.tokenType} ${this._auth.token}`
             },
             responseType: "json"
-        }
+        };
+
+        if (!(data === undefined)) requestConfig.data = data;
+
+        return requestConfig;
     }
 
     /**
@@ -334,9 +343,81 @@ export class Client {
      * ========================================================================
      */
 
+    /**
+     * Get details about your tank inc. its current sounding.
+     * @returns 
+     */
     async getTank() {
         const response = await this._apiRequest(this._getApiRequestConfig(ENDPOINT.TANK.CURRENT));
 
         return new esyoil_types.Tank(response);
+    }
+
+    /**
+     * Add a sounding or filling event with a full set of features.
+     * @param date 
+     * @param volume 
+     * @param height 
+     * @param price 
+     * @param isFilling 
+     * @param overwrite 
+     * @returns 
+     */
+    async addRawSounding(date?: Date, volume?: number, height?:number, price?: number, isFilling = false, overwrite = false): Promise<Array<esyoil_types.SoundingEvent>> {
+
+        if ((volume === undefined) && (height === undefined)) throw new Error("You must set VOLUME or HEIGHT!");
+
+        if (!(volume === undefined) && !(height === undefined)) throw new Error("You must either set VOLUME or HEIGHT, but not BOTH!");
+
+        let formData = `date=${encodeURIComponentForm(date === undefined ? new Date().toUTCString() : date.toUTCString())}`;
+
+        formData = formData.concat("&volume=", encodeURIComponentForm(volume === undefined ? "null" : `${volume}`));
+        formData = formData.concat("&height=", encodeURIComponentForm(height === undefined ? "null" : `${height}`));
+        formData = formData.concat("&price=", encodeURIComponentForm(price === undefined ? "null" : `${price}`));
+        formData = formData.concat("&is-filling=", encodeURIComponentForm(isFilling === undefined ? "null" : (isFilling ? "1" : "null")));
+        formData = formData.concat("&overwrite=", encodeURIComponentForm(overwrite === undefined ? "false" : (overwrite ? "true" : "false")));
+
+        const response = await this._apiRequest(
+            this._getApiRequestConfig(
+                ENDPOINT.TANK.SOUNDING.ADD, 
+                "POST",
+                formData
+            )
+        );
+
+        const data = new Array<esyoil_types.SoundingEvent>();
+
+        for (let index = 0; index < response.length; index++) {
+            data.push(new esyoil_types.SoundingEvent(response[index]));
+        }
+
+        return data;
+    }
+
+    /**
+     * Add a sounding event.
+     * @param date Optional date for the event
+     * @param volume Current oil volume in liters
+     * @param height Current oil height in cm
+     * @param overwrite Overwrite existing sounding events for the given date?
+     * @returns 
+     * 
+     * @description You must set either volume OR height, but not both at the same time.
+     */
+    async addSounding(date?: Date, volume?: number, height?:number, overwrite = false): Promise<Array<esyoil_types.SoundingEvent>> {
+        return await this.addRawSounding(date, volume, height, undefined, false, overwrite);
+    }
+
+    /**
+     * Add a filling event.
+     * @param date Optional date for the event
+     * @param volume NEW oil volume in liters after filling
+     * @param price Price for overall filling volume
+     * @param height NEW oil height in cm after filling
+     * @param overwrite Overwrite existing filling events for the given date?
+     * @returns 
+     */
+    async addFilling(date?: Date, volume?: number, price?: number, height?:number, overwrite = false) {
+        return await this.addRawSounding(date, volume, height, undefined, true, overwrite);
     }
 }
