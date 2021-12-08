@@ -44,6 +44,12 @@ async function main() {
 
     //  Tank data
     console.dir(await api.getTank(), {depth: null, colors: true});
+
+    //  Add sounding
+    // console.dir(await api.addSounding(new Date(), 3725, undefined, false), {depth: null, colors: true});
+
+    //  Add filling
+    // console.dir(await api.addFilling(new Date(), 4200, 500), {depth: null, colors: true});
 }
 
 main();
