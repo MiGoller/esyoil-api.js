@@ -29,7 +29,7 @@
   },
   "homepage": "https://github.com/MiGoller/esyoil-api.js#readme",
   "dependencies": {
-    "axios": "^0.24.0",
+    "axios": "^1.6.3",
     "tslint": "^6.1.3"
   },
   "devDependencies": {
